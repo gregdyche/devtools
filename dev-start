@@ -10,6 +10,12 @@ check_execution_mode() {
         # Script is being executed (not sourced)
         echo "⚠️  Script is being executed in a subshell"
         echo "💡 Virtual environment activation will not persist to your shell"
+        
+        if [ "$NON_INTERACTIVE" = true ]; then
+            echo "⏭️  Non-interactive mode - continuing with subshell execution..."
+            return 0
+        fi
+        
         echo ""
         echo "Options:"
         echo "  1. Continue anyway (venv active only during script)"
@@ -19,8 +25,12 @@ check_execution_mode() {
         echo "Current process: $$ (parent: $PPID)"
         echo "Shell info: $0"
         echo ""
-        read -p "❓ Choose (1/2/3): " -n 1 -r
-        echo
+        read -p "❓ Choose (1/2/3): " -t 30 -n 1 -r
+        printf "\n"
+        if [ $? -ne 0 ]; then
+            echo "⏰ Timeout - defaulting to option 1"
+            REPLY="1"
+        fi
         case $REPLY in
             1)
                 echo "⏭️  Continuing with subshell execution..."
@@ -45,6 +55,7 @@ check_execution_mode() {
 
 CONFIG_FILE=".dev-start.conf"
 RESET_CONFIG=false
+NON_INTERACTIVE=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -53,9 +64,13 @@ while [[ $# -gt 0 ]]; do
             RESET_CONFIG=true
             shift
             ;;
+        --non-interactive|-n)
+            NON_INTERACTIVE=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--reset]"
+            echo "Usage: $0 [--reset] [--non-interactive|-n]"
             exit 1
             ;;
     esac
@@ -159,7 +174,7 @@ check_git_status() {
         echo "🔄 Recent commits:"
         git log --oneline -3
         echo ""
-        read -p "❓ Continue without committing? (y/n): " -n 1 -r
+        read -p "❓ Continue without committing? (y/n): " -t 30 -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo "🛑 Exiting. Please commit or stash changes first."
@@ -377,4 +392,12 @@ main() {
     fi
 }
 
-main "$@"
+# Set up timeout for the entire script
+if [ "$NON_INTERACTIVE" != true ]; then
+    timeout 300 bash -c 'main "$@"' -- "$@" || {
+        echo "⏰ Script timeout after 5 minutes"
+        exit 1
+    }
+else
+    main "$@"
+fi
