@@ -4,11 +4,102 @@
 
 set -e
 
+CONFIG_FILE=".dev-start.conf"
+RESET_CONFIG=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --reset)
+            RESET_CONFIG=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--reset]"
+            exit 1
+            ;;
+    esac
+done
+
 print_header() {
     echo ""
     echo "=============================="
     echo "$1"
     echo "=============================="
+}
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ] && [ "$RESET_CONFIG" = false ]; then
+        source "$CONFIG_FILE"
+        return 0
+    fi
+    return 1
+}
+
+save_config() {
+    cat > "$CONFIG_FILE" << EOF
+# dev-start configuration
+DIRECTORIES_CHECKED=true
+SKIP_DIRS="$SKIP_DIRS"
+CREATE_DIRS="$CREATE_DIRS"
+PROJECT_TYPE="$PROJECT_TYPE"
+SKIP_VENV_CHECK=${SKIP_VENV_CHECK:-false}
+EOF
+    echo "💾 Settings saved to $CONFIG_FILE"
+}
+
+configure_project() {
+    print_header "⚙️ Project Configuration"
+    
+    # Detect project type
+    if [ -f "manage.py" ]; then
+        PROJECT_TYPE="django"
+    elif [ -f "package.json" ]; then
+        PROJECT_TYPE="nodejs"
+    elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+        PROJECT_TYPE="python"
+    else
+        PROJECT_TYPE="generic"
+    fi
+    
+    echo "📋 Detected project type: $PROJECT_TYPE"
+    
+    # Ask about directories
+    local dirs=("src" "tests" "docs" "examples" "scripts" "data" "config" ".github")
+    local create_dirs=()
+    local skip_dirs=()
+    
+    echo ""
+    echo "📁 Configure directory structure (answer for each):"
+    for dir in "${dirs[@]}"; do
+        if [ ! -d "$dir" ]; then
+            echo "❓ Always create $dir/? (y/n): "
+            read -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                create_dirs+=("$dir")
+            else
+                skip_dirs+=("$dir")
+            fi
+        fi
+    done
+    
+    CREATE_DIRS=$(IFS=,; echo "${create_dirs[*]}")
+    SKIP_DIRS=$(IFS=,; echo "${skip_dirs[*]}")
+    
+    # Ask about venv check
+    echo ""
+    echo "❓ Skip Python virtual environment check? (y/n): "
+    read -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        SKIP_VENV_CHECK=true
+    else
+        SKIP_VENV_CHECK=false
+    fi
+    
+    save_config
 }
 
 check_git_repo() {
@@ -57,6 +148,11 @@ check_git_status() {
 }
 
 activate_python_venv() {
+    if [ "$SKIP_VENV_CHECK" = true ]; then
+        echo "⏭️  Skipping Python virtual environment check (configured)"
+        return 0
+    fi
+    
     VENV_PATHS=()
     for d in */; do
         [ -f "$d/bin/activate" ] && VENV_PATHS+=("$d")
@@ -104,6 +200,67 @@ check_env_files() {
     fi
 }
 
+check_project_structure() {
+    if [ "$DIRECTORIES_CHECKED" != true ]; then
+        return 0
+    fi
+    
+    print_header "📁 Project Structure"
+    local dirs=("src" "tests" "docs" "examples" "scripts" "data" "config" ".github")
+    
+    # Convert comma-separated strings to arrays
+    IFS=',' read -ra CREATE_DIRS_ARRAY <<< "$CREATE_DIRS"
+    IFS=',' read -ra SKIP_DIRS_ARRAY <<< "$SKIP_DIRS"
+    
+    # Check existing directories
+    for dir in "${dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            echo "✅ $dir/ exists"
+        fi
+    done
+    
+    # Create configured directories
+    for dir in "${CREATE_DIRS_ARRAY[@]}"; do
+        if [ -n "$dir" ] && [ ! -d "$dir" ]; then
+            mkdir -p "$dir"
+            echo "✅ Created $dir/ (configured)"
+            
+            case "$dir" in
+                "src")
+                    echo "# Source code" > "$dir/README.md"
+                    ;;
+                "tests")
+                    echo "# Tests" > "$dir/README.md"
+                    ;;
+                "docs")
+                    echo "# Documentation" > "$dir/README.md"
+                    ;;
+                "examples")
+                    echo "# Examples" > "$dir/README.md"
+                    ;;
+                "scripts")
+                    echo "# Build and deployment scripts" > "$dir/README.md"
+                    ;;
+                "data")
+                    echo "# Sample data files" > "$dir/README.md"
+                    ;;
+                "config")
+                    echo "# Configuration files" > "$dir/README.md"
+                    ;;
+                ".github")
+                    mkdir -p "$dir/workflows"
+                    echo "# GitHub workflows and templates" > "$dir/README.md"
+                    ;;
+            esac
+        fi
+    done
+    
+    # Show skipped directories
+    if [ -n "$SKIP_DIRS" ]; then
+        echo "⏭️  Skipped directories (configured): $SKIP_DIRS"
+    fi
+}
+
 show_tips() {
     print_header "💡 Helpful Commands"
     [ -f "manage.py" ] && echo "  python manage.py runserver"
@@ -114,15 +271,29 @@ show_tips() {
 
 main() {
     echo "🚀 $(date '+%Y-%m-%d %H:%M:%S') Starting dev environment in: $(pwd)"
+    
+    # Load or create configuration
+    if ! load_config || [ "$RESET_CONFIG" = true ]; then
+        configure_project
+        echo ""
+    fi
+    
     check_git_repo
     check_git_status
     activate_python_venv
     analyze_project_type
+    check_project_structure
     check_ports
     check_env_files
     show_tips
     echo ""
     echo "✅ Dev environment ready: $(pwd)"
+    
+    # Add .dev-start.conf to .gitignore if it doesn't exist
+    if [ -f ".gitignore" ] && ! grep -q ".dev-start.conf" .gitignore; then
+        echo ".dev-start.conf" >> .gitignore
+        echo "📝 Added .dev-start.conf to .gitignore"
+    fi
 }
 
 main "$@"
