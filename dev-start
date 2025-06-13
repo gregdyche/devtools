@@ -1,0 +1,128 @@
+#!/bin/bash
+# dev-start: Prioritize Git status before activating Python venv
+# Supports flexible venv folder names with bin/activate
+
+set -e
+
+print_header() {
+    echo ""
+    echo "=============================="
+    echo "$1"
+    echo "=============================="
+}
+
+check_git_repo() {
+    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        echo "❌ Not in a Git repository"
+        exit 1
+    fi
+    echo "📁 Project: $(basename "$(pwd)")"
+}
+
+check_git_status() {
+    print_header "📋 Git Status"
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "⚠️  Uncommitted changes:"
+        git status --short
+        echo ""
+        echo "🔄 Recent commits:"
+        git log --oneline -3
+        echo ""
+        read -p "❓ Continue without committing? (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "🛑 Exiting. Please commit or stash changes first."
+            exit 1
+        fi
+    else
+        echo "✅ Working directory clean"
+        local current_branch
+        current_branch=$(git branch --show-current)
+        echo "📍 Branch: $current_branch"
+
+        if git fetch > /dev/null 2>&1; then
+            local behind
+            behind=$(git rev-list --count HEAD..origin/$current_branch 2>/dev/null || echo "0")
+            if [ "$behind" -gt 0 ]; then
+                echo "⚠️  $behind commits behind origin"
+                read -p "🔄 Pull latest changes? (y/n): " -n 1 -r
+                echo
+                [[ $REPLY =~ ^[Yy]$ ]] && git pull
+            else
+                echo "✅ Up to date with origin"
+            fi
+        fi
+    fi
+}
+
+activate_python_venv() {
+    VENV_PATHS=()
+    for d in */; do
+        [ -f "$d/bin/activate" ] && VENV_PATHS+=("$d")
+    done
+
+    if [ "${#VENV_PATHS[@]}" -eq 1 ]; then
+        echo "🐍 Activating Python virtual environment: ${VENV_PATHS[0]}"
+        source "${VENV_PATHS[0]}bin/activate"
+        echo "✅ Python: $(which python)"
+    elif [ "${#VENV_PATHS[@]}" -eq 0 ]; then
+        echo "❌ No Python virtual environment found."
+        echo "🛠️  Create one with: python -m venv venv"
+        exit 1
+    else
+        echo "❌ Multiple virtual environments found:"
+        printf '  - %s\n' "${VENV_PATHS[@]}"
+        echo "🛠️  Please keep only one venv directory in root."
+        exit 1
+    fi
+}
+
+analyze_project_type() {
+    print_header "🔍 Project Analysis"
+    [ -f "manage.py" ] && echo "🎯 Django project detected"
+    [ -f "package.json" ] && echo "📦 Node.js project detected"
+    [ -f "docker-compose.yml" ] || [ -f "Dockerfile" ] && echo "🐳 Docker project detected"
+}
+
+check_ports() {
+    print_header "📡 Port Check"
+    for port in 3000 5000 8000 8080; do
+        if lsof -i :$port > /dev/null 2>&1; then
+            local proc
+            proc=$(lsof -i :$port | awk 'NR==2 {print $1}')
+            echo "⚠️  Port $port in use by $proc"
+        fi
+    done
+}
+
+check_env_files() {
+    print_header "🔐 Environment Check"
+    if [ -f ".env" ]; then
+        echo "🔑 .env file found"
+        [ -f ".env.example" ] && echo "📝 Reference: .env.example"
+    fi
+}
+
+show_tips() {
+    print_header "💡 Helpful Commands"
+    [ -f "manage.py" ] && echo "  python manage.py runserver"
+    [ -f "package.json" ] && echo "  npm run dev / npm start"
+    echo "  git status"
+    echo "  deactivate  # Exit Python venv"
+}
+
+main() {
+    echo "🚀 $(date '+%Y-%m-%d %H:%M:%S') Starting dev environment in: $(pwd)"
+    check_git_repo
+    check_git_status
+    activate_python_venv
+    analyze_project_type
+    check_ports
+    check_env_files
+    show_tips
+    echo ""
+    echo "✅ Dev environment ready: $(pwd)"
+}
+
+main "$@"
