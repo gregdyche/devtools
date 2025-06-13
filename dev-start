@@ -4,6 +4,45 @@
 
 set -e
 
+# Detect if script is being sourced or executed
+check_execution_mode() {
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        # Script is being executed (not sourced)
+        echo "⚠️  Script is being executed in a subshell"
+        echo "💡 Virtual environment activation will not persist to your shell"
+        echo ""
+        echo "Options:"
+        echo "  1. Continue anyway (venv active only during script)"
+        echo "  2. Exit and run: source $(realpath "${BASH_SOURCE[0]}")"
+        echo "  3. Exit and run: . $(realpath "${BASH_SOURCE[0]}")"
+        echo ""
+        echo "Current process: $$ (parent: $PPID)"
+        echo "Shell info: $0"
+        echo ""
+        read -p "❓ Choose (1/2/3): " -n 1 -r
+        echo
+        case $REPLY in
+            1)
+                echo "⏭️  Continuing with subshell execution..."
+                return 0
+                ;;
+            2|3)
+                echo "🛑 Exiting. Please run the suggested command above."
+                exit 0
+                ;;
+            *)
+                echo "❌ Invalid choice. Exiting."
+                exit 1
+                ;;
+        esac
+    else
+        # Script is being sourced
+        echo "✅ Script is being sourced - virtual environment will persist"
+        echo "Current process: $$ (parent: $PPID)"
+        return 0
+    fi
+}
+
 CONFIG_FILE=".dev-start.conf"
 RESET_CONFIG=false
 
@@ -309,6 +348,10 @@ show_tips() {
 
 main() {
     echo "🚀 $(date '+%Y-%m-%d %H:%M:%S') Starting dev environment in: $(pwd)"
+    
+    # Check execution mode first
+    check_execution_mode
+    echo ""
     
     # Load or create configuration
     if ! load_config || [ "$RESET_CONFIG" = true ]; then
