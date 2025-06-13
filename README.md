@@ -1,2 +1,3 @@
-# devtools
-misc scripts to help me get work done
+## 🚀 Dev Tools by Greg
+
+`dev-start` - Initializes a project environment
