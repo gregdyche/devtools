@@ -153,22 +153,60 @@ activate_python_venv() {
         return 0
     fi
     
+    print_header "🐍 Python Virtual Environment"
+    
     VENV_PATHS=()
     for d in */; do
         [ -f "$d/bin/activate" ] && VENV_PATHS+=("$d")
     done
 
     if [ "${#VENV_PATHS[@]}" -eq 1 ]; then
-        echo "🐍 Activating Python virtual environment: ${VENV_PATHS[0]}"
-        source "${VENV_PATHS[0]}bin/activate"
-        echo "✅ Python: $(which python)"
+        echo "📦 Found virtual environment: ${VENV_PATHS[0]%/}"
+        read -p "❓ Activate this virtual environment? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            source "${VENV_PATHS[0]}bin/activate"
+            echo "✅ Activated: ${VENV_PATHS[0]%/}"
+            echo "✅ Python: $(which python)"
+        else
+            echo "⏭️  Skipping virtual environment activation"
+        fi
     elif [ "${#VENV_PATHS[@]}" -eq 0 ]; then
-        echo "❌ No Python virtual environment found."
-        echo "🛠️  Create one with: python -m venv venv"
-        exit 1
+        echo "❌ No Python virtual environment found"
+        read -p "❓ Create a new virtual environment? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            # Suggest name based on project
+            local suggested_name="venv"
+            if [ -f "manage.py" ]; then
+                suggested_name="django-env"
+            elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+                suggested_name="venv"
+            fi
+            
+            echo "💡 Suggested name: $suggested_name"
+            read -p "📝 Enter virtual environment name (or press Enter for '$suggested_name'): " venv_name
+            venv_name=${venv_name:-$suggested_name}
+            
+            echo "🔨 Creating virtual environment: $venv_name"
+            python -m venv "$venv_name"
+            
+            read -p "❓ Activate the new virtual environment? (y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                source "$venv_name/bin/activate"
+                echo "✅ Created and activated: $venv_name"
+                echo "✅ Python: $(which python)"
+            else
+                echo "✅ Created: $venv_name (not activated)"
+                echo "💡 To activate later: source $venv_name/bin/activate"
+            fi
+        else
+            echo "⏭️  Skipping virtual environment creation"
+        fi
     else
         echo "❌ Multiple virtual environments found:"
-        printf '  - %s\n' "${VENV_PATHS[@]}"
+        printf '  - %s\n' "${VENV_PATHS[@]%/}"
         echo "🛠️  Please keep only one venv directory in root."
         exit 1
     fi
