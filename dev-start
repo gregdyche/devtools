@@ -4,47 +4,74 @@
 
 set -e
 
+VERBOSE=false
+if [[ "$1" == "--verbose" ]]; then
+    VERBOSE=true
+fi
+
 check_git_repo() {
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         echo "❌ Not in a Git repository"
         return 1
     fi
-    echo "📁 Project: $(basename "$(pwd)")"
+    if $VERBOSE; then
+        echo "📁 Project: $(basename "$(pwd)")"
+    fi
 }
 
 check_git_status() {
-    echo ""
-    echo "📋 Git Status"
-    echo "============="
+    if $VERBOSE; then
+        echo ""
+        echo "📋 Git Status"
+        echo "============="
+    fi
     
     if [ -n "$(git status --porcelain)" ]; then
-        echo "⚠️  Uncommitted changes detected:"
-        git status --short
-        echo ""
-        echo "📝 Suggestion: Commit or stash changes before development"
+        if $VERBOSE; then
+            echo "⚠️  Uncommitted changes detected:"
+            git status --short
+            echo ""
+            echo "📝 Suggestion: Commit or stash changes before development"
+        else
+            echo "⚠️  Uncommitted changes:"
+            echo "git commit -am 'commit message' && git push"
+        fi
     else
-        echo "✅ Working directory clean"
+        if $VERBOSE; then
+            echo "✅ Working directory clean"
+        fi
         local current_branch
         current_branch=$(git branch --show-current)
-        echo "📍 Current branch: $current_branch"
+        if $VERBOSE; then
+            echo "📍 Current branch: $current_branch"
+        fi
         
         if git fetch > /dev/null 2>&1; then
             local behind
             behind=$(git rev-list --count HEAD..origin/$current_branch 2>/dev/null || echo "0")
             if [ "$behind" -gt 0 ]; then
-                echo "⚠️  $behind commits behind origin/$current_branch"
-                echo "📝 Suggestion: Pull latest changes with 'git pull'"
+                if $VERBOSE; then
+                    echo "⚠️  $behind commits behind origin/$current_branch"
+                    echo "📝 Suggestion: Pull latest changes with 'git pull'"
+                else
+                    echo "⚠️  $behind commits behind:"
+                    echo "git pull"
+                fi
             else
-                echo "✅ Up to date with origin"
+                if $VERBOSE; then
+                    echo "✅ Up to date with origin"
+                fi
             fi
         fi
     fi
 }
 
 check_python_venv() {
-    echo ""
-    echo "🐍 Python Virtual Environment"
-    echo "============================="
+    if $VERBOSE; then
+        echo ""
+        echo "🐍 Python Virtual Environment"
+        echo "============================="
+    fi
     
     local venv_paths=()
     for d in */; do
@@ -52,26 +79,46 @@ check_python_venv() {
     done
     
     if [ "${#venv_paths[@]}" -eq 1 ]; then
-        echo "✅ Virtual environment found: ${venv_paths[0]%/}"
+        if $VERBOSE; then
+            echo "✅ Virtual environment found: ${venv_paths[0]%/}"
+        fi
         if [ -z "$VIRTUAL_ENV" ]; then
-            echo "📝 Suggestion: Activate with 'source ${venv_paths[0]}bin/activate'"
+            if $VERBOSE; then
+                echo "📝 Suggestion: Activate with 'source ${venv_paths[0]}bin/activate'"
+            else
+                echo "🐍 Activate virtual environment:"
+                echo "source ${venv_paths[0]}bin/activate"
+            fi
         else
-            echo "✅ Virtual environment already active: $(basename "$VIRTUAL_ENV")"
+            if $VERBOSE; then
+                echo "✅ Virtual environment already active: $(basename "$VIRTUAL_ENV")"
+            fi
         fi
     elif [ "${#venv_paths[@]}" -eq 0 ]; then
-        echo "❌ No Python virtual environment found"
-        echo "📝 Suggestion: Create one with 'python -m venv venv'"
+        if $VERBOSE; then
+            echo "❌ No Python virtual environment found"
+            echo "📝 Suggestion: Create one with 'python -m venv venv'"
+        else
+            echo "❌ No virtual environment:"
+            echo "python -m venv venv"
+        fi
     else
-        echo "⚠️  Multiple virtual environments found:"
-        printf '   - %s\n' "${venv_paths[@]%/}"
-        echo "📝 Suggestion: Keep only one venv directory in project root"
+        if $VERBOSE; then
+            echo "⚠️  Multiple virtual environments found:"
+            printf '   - %s\n' "${venv_paths[@]%/}"
+            echo "📝 Suggestion: Keep only one venv directory in project root"
+        else
+            echo "⚠️  Multiple virtual environments found"
+        fi
     fi
 }
 
 check_project_structure() {
-    echo ""
-    echo "📁 Project Structure" 
-    echo "===================="
+    if $VERBOSE; then
+        echo ""
+        echo "📁 Project Structure" 
+        echo "===================="
+    fi
     
     local standard_dirs=("src" "tests" "docs")
     local optional_dirs=("examples" "scripts" "data" "config" ".github")
@@ -80,7 +127,9 @@ check_project_structure() {
     # Check standard directories
     for dir in "${standard_dirs[@]}"; do
         if [ -d "$dir" ]; then
-            echo "✅ $dir/ exists"
+            if $VERBOSE; then
+                echo "✅ $dir/ exists"
+            fi
         else
             missing_dirs+=("$dir")
         fi
@@ -89,40 +138,51 @@ check_project_structure() {
     # Check optional directories
     for dir in "${optional_dirs[@]}"; do
         if [ -d "$dir" ]; then
-            echo "✅ $dir/ exists"
+            if $VERBOSE; then
+                echo "✅ $dir/ exists"
+            fi
         fi
     done
     
     if [ ${#missing_dirs[@]} -gt 0 ]; then
-        echo "📝 Missing standard directories: ${missing_dirs[*]}"
-        echo "   Suggestion: mkdir -p ${missing_dirs[*]}"
+        if $VERBOSE; then
+            echo "📝 Missing standard directories: ${missing_dirs[*]}"
+            echo "   Suggestion: mkdir -p ${missing_dirs[*]}"
+        else
+            echo "📁 Missing directories:"
+            echo "mkdir -p ${missing_dirs[*]}"
+        fi
     fi
 }
 
 check_project_type() {
-    echo ""
-    echo "🔍 Project Type"
-    echo "==============="
-    
-    local project_types=()
-    [ -f "manage.py" ] && project_types+=("Django")
-    [ -f "package.json" ] && project_types+=("Node.js")
-    [ -f "requirements.txt" ] && project_types+=("Python")
-    [ -f "pyproject.toml" ] && project_types+=("Python")
-    [ -f "Dockerfile" ] && project_types+=("Docker")
-    [ -f "docker-compose.yml" ] && project_types+=("Docker Compose")
-    
-    if [ ${#project_types[@]} -gt 0 ]; then
-        echo "✅ Detected: ${project_types[*]}"
-    else
-        echo "❓ Generic project (no specific framework detected)"
+    if $VERBOSE; then
+        echo ""
+        echo "🔍 Project Type"
+        echo "==============="
+        
+        local project_types=()
+        [ -f "manage.py" ] && project_types+=("Django")
+        [ -f "package.json" ] && project_types+=("Node.js")
+        [ -f "requirements.txt" ] && project_types+=("Python")
+        [ -f "pyproject.toml" ] && project_types+=("Python")
+        [ -f "Dockerfile" ] && project_types+=("Docker")
+        [ -f "docker-compose.yml" ] && project_types+=("Docker Compose")
+        
+        if [ ${#project_types[@]} -gt 0 ]; then
+            echo "✅ Detected: ${project_types[*]}"
+        else
+            echo "❓ Generic project (no specific framework detected)"
+        fi
     fi
 }
 
 check_ports() {
-    echo ""
-    echo "📡 Port Status"
-    echo "=============="
+    if $VERBOSE; then
+        echo ""
+        echo "📡 Port Status"
+        echo "=============="
+    fi
     
     local busy_ports=()
     for port in 3000 5000 8000 8080; do
@@ -134,45 +194,104 @@ check_ports() {
     done
     
     if [ ${#busy_ports[@]} -gt 0 ]; then
-        echo "⚠️  Busy ports: ${busy_ports[*]}"
-        echo "📝 Suggestion: Stop services or use different ports"
+        if $VERBOSE; then
+            echo "⚠️  Busy ports: ${busy_ports[*]}"
+            echo "📝 Suggestion: Stop services or use different ports"
+        else
+            echo "⚠️  Busy ports: ${busy_ports[*]}"
+            echo "lsof -ti:PORT | xargs kill -9"
+        fi
     else
-        echo "✅ Common development ports (3000, 5000, 8000, 8080) available"
+        if $VERBOSE; then
+            echo "✅ Common development ports (3000, 5000, 8000, 8080) available"
+        fi
     fi
 }
 
 check_env_files() {
-    echo ""
-    echo "🔐 Environment Files"
-    echo "==================="
+    if $VERBOSE; then
+        echo ""
+        echo "🔐 Environment Files"
+        echo "==================="
+    fi
     
     if [ -f ".env" ]; then
-        echo "✅ .env file found"
-        [ -f ".env.example" ] && echo "✅ .env.example reference file found"
-        [ ! -f ".env.example" ] && echo "📝 Suggestion: Create .env.example as a template"
+        if $VERBOSE; then
+            echo "✅ .env file found"
+            [ -f ".env.example" ] && echo "✅ .env.example reference file found"
+        fi
+        if [ ! -f ".env.example" ]; then
+            if $VERBOSE; then
+                echo "📝 Suggestion: Create .env.example as a template"
+            else
+                echo "🔐 Missing .env.example:"
+                echo "cp .env .env.example"
+            fi
+        fi
     else
-        echo "❓ No .env file found"
-        [ -f ".env.example" ] && echo "📝 Suggestion: Copy .env.example to .env and configure"
+        if [ -f ".env.example" ]; then
+            if $VERBOSE; then
+                echo "❓ No .env file found"
+                echo "📝 Suggestion: Copy .env.example to .env and configure"
+            else
+                echo "🔐 Missing .env file:"
+                echo "cp .env.example .env"
+            fi
+        else
+            if $VERBOSE; then
+                echo "❓ No .env file found"
+            fi
+        fi
     fi
 }
 
 show_summary() {
-    echo ""
-    echo "💡 Quick Start Commands"
-    echo "======================"
-    
-    [ -f "manage.py" ] && echo "   python manage.py runserver    # Django development server"
-    [ -f "package.json" ] && echo "   npm run dev                   # Node.js development"
-    [ -f "requirements.txt" ] && echo "   pip install -r requirements.txt  # Install Python dependencies"
-    
-    echo "   git status                    # Check git status"
-    echo "   deactivate                    # Exit Python virtual environment"
+    if $VERBOSE; then
+        echo ""
+        echo "💡 Quick Start Commands"
+        echo "======================"
+        
+        [ -f "manage.py" ] && echo "   python manage.py runserver    # Django development server"
+        [ -f "package.json" ] && echo "   npm run dev                   # Node.js development"
+        [ -f "requirements.txt" ] && echo "   pip install -r requirements.txt  # Install Python dependencies"
+        
+        echo "   git status                    # Check git status"
+        echo "   deactivate                    # Exit Python virtual environment"
+    else
+        local has_commands=false
+        
+        if [ -f "manage.py" ]; then
+            if ! $has_commands; then
+                echo "💡 Quick start:"
+                has_commands=true
+            fi
+            echo "python manage.py runserver"
+        fi
+        
+        if [ -f "package.json" ]; then
+            if ! $has_commands; then
+                echo "💡 Quick start:"
+                has_commands=true
+            fi
+            echo "npm run dev"
+        fi
+        
+        if [ -f "requirements.txt" ]; then
+            if ! $has_commands; then
+                echo "💡 Quick start:"
+                has_commands=true
+            fi
+            echo "pip install -r requirements.txt"
+        fi
+    fi
 }
 
 main() {
-    echo "🚀 Development Environment Check - $(date '+%Y-%m-%d %H:%M:%S')"
-    echo "Location: $(pwd)"
-    echo ""
+    if $VERBOSE; then
+        echo "🚀 Development Environment Check - $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Location: $(pwd)"
+        echo ""
+    fi
     
     if ! check_git_repo; then
         exit 1
@@ -186,9 +305,11 @@ main() {
     check_env_files
     show_summary
     
-    echo ""
-    echo "✅ Environment check complete"
-    echo "📝 Review suggestions above and take action as needed"
+    if $VERBOSE; then
+        echo ""
+        echo "✅ Environment check complete"
+        echo "📝 Review suggestions above and take action as needed"
+    fi
 }
 
 main "$@"
