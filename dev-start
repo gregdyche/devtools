@@ -1,199 +1,39 @@
 #!/bin/bash
-# dev-start: Prioritize Git status before activating Python venv
-# Supports flexible venv folder names with bin/activate
+# dev-start: Simple development environment checker
+# Reports status and missing requirements without taking actions
 
 set -e
-
-# Detect if script is being sourced or executed
-check_execution_mode() {
-    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-        # Script is being executed (not sourced)
-        echo "⚠️  Script is being executed in a subshell"
-        echo "💡 Virtual environment activation will not persist to your shell"
-        
-        if [ "$NON_INTERACTIVE" = true ]; then
-            echo "⏭️  Non-interactive mode - continuing with subshell execution..."
-            return 0
-        fi
-        
-        echo ""
-        echo "Options:"
-        echo "  1. Continue anyway (venv active only during script)"
-        echo "  2. Exit and run: source $(realpath "${BASH_SOURCE[0]}")"
-        echo "  3. Exit and run: . $(realpath "${BASH_SOURCE[0]}")"
-        echo ""
-        echo "Current process: $$ (parent: $PPID)"
-        echo "Shell info: $0"
-        echo ""
-        read -p "❓ Choose (1/2/3): " -t 30 -n 1 -r
-        printf "\n"
-        if [ $? -ne 0 ]; then
-            echo "⏰ Timeout - defaulting to option 1"
-            REPLY="1"
-        fi
-        case $REPLY in
-            1)
-                echo "⏭️  Continuing with subshell execution..."
-                return 0
-                ;;
-            2|3)
-                echo "🛑 Exiting. Please run the suggested command above."
-                exit 0
-                ;;
-            *)
-                echo "❌ Invalid choice. Exiting."
-                exit 1
-                ;;
-        esac
-    else
-        # Script is being sourced
-        echo "✅ Script is being sourced - virtual environment will persist"
-        echo "Current process: $$ (parent: $PPID)"
-        return 0
-    fi
-}
-
-CONFIG_FILE=".dev-start.conf"
-RESET_CONFIG=false
-NON_INTERACTIVE=false
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --reset)
-            RESET_CONFIG=true
-            shift
-            ;;
-        --non-interactive|-n)
-            NON_INTERACTIVE=true
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            echo "Usage: $0 [--reset] [--non-interactive|-n]"
-            exit 1
-            ;;
-    esac
-done
-
-print_header() {
-    echo ""
-    echo "=============================="
-    echo "$1"
-    echo "=============================="
-}
-
-load_config() {
-    if [ -f "$CONFIG_FILE" ] && [ "$RESET_CONFIG" = false ]; then
-        source "$CONFIG_FILE"
-        return 0
-    fi
-    return 1
-}
-
-save_config() {
-    cat > "$CONFIG_FILE" << EOF
-# dev-start configuration
-DIRECTORIES_CHECKED=true
-SKIP_DIRS="$SKIP_DIRS"
-CREATE_DIRS="$CREATE_DIRS"
-PROJECT_TYPE="$PROJECT_TYPE"
-SKIP_VENV_CHECK=${SKIP_VENV_CHECK:-false}
-EOF
-    echo "💾 Settings saved to $CONFIG_FILE"
-}
-
-configure_project() {
-    print_header "⚙️ Project Configuration"
-    
-    # Detect project type
-    if [ -f "manage.py" ]; then
-        PROJECT_TYPE="django"
-    elif [ -f "package.json" ]; then
-        PROJECT_TYPE="nodejs"
-    elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
-        PROJECT_TYPE="python"
-    else
-        PROJECT_TYPE="generic"
-    fi
-    
-    echo "📋 Detected project type: $PROJECT_TYPE"
-    
-    # Ask about directories
-    local dirs=("src" "tests" "docs" "examples" "scripts" "data" "config" ".github")
-    local create_dirs=()
-    local skip_dirs=()
-    
-    echo ""
-    echo "📁 Configure directory structure (answer for each):"
-    for dir in "${dirs[@]}"; do
-        if [ ! -d "$dir" ]; then
-            echo "❓ Always create $dir/? (y/n): "
-            read -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                create_dirs+=("$dir")
-            else
-                skip_dirs+=("$dir")
-            fi
-        fi
-    done
-    
-    CREATE_DIRS=$(IFS=,; echo "${create_dirs[*]}")
-    SKIP_DIRS=$(IFS=,; echo "${skip_dirs[*]}")
-    
-    # Ask about venv check
-    echo ""
-    echo "❓ Skip Python virtual environment check? (y/n): "
-    read -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        SKIP_VENV_CHECK=true
-    else
-        SKIP_VENV_CHECK=false
-    fi
-    
-    save_config
-}
 
 check_git_repo() {
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         echo "❌ Not in a Git repository"
-        exit 1
+        return 1
     fi
     echo "📁 Project: $(basename "$(pwd)")"
 }
 
 check_git_status() {
-    print_header "📋 Git Status"
-
+    echo ""
+    echo "📋 Git Status"
+    echo "============="
+    
     if [ -n "$(git status --porcelain)" ]; then
-        echo "⚠️  Uncommitted changes:"
+        echo "⚠️  Uncommitted changes detected:"
         git status --short
         echo ""
-        echo "🔄 Recent commits:"
-        git log --oneline -3
-        echo ""
-        read -p "❓ Continue without committing? (y/n): " -t 30 -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "🛑 Exiting. Please commit or stash changes first."
-            exit 1
-        fi
+        echo "📝 Suggestion: Commit or stash changes before development"
     else
         echo "✅ Working directory clean"
         local current_branch
         current_branch=$(git branch --show-current)
-        echo "📍 Branch: $current_branch"
-
+        echo "📍 Current branch: $current_branch"
+        
         if git fetch > /dev/null 2>&1; then
             local behind
             behind=$(git rev-list --count HEAD..origin/$current_branch 2>/dev/null || echo "0")
             if [ "$behind" -gt 0 ]; then
-                echo "⚠️  $behind commits behind origin"
-                read -p "🔄 Pull latest changes? (y/n): " -n 1 -r
-                echo
-                [[ $REPLY =~ ^[Yy]$ ]] && git pull
+                echo "⚠️  $behind commits behind origin/$current_branch"
+                echo "📝 Suggestion: Pull latest changes with 'git pull'"
             else
                 echo "✅ Up to date with origin"
             fi
@@ -201,203 +41,154 @@ check_git_status() {
     fi
 }
 
-activate_python_venv() {
-    if [ "$SKIP_VENV_CHECK" = true ]; then
-        echo "⏭️  Skipping Python virtual environment check (configured)"
-        return 0
-    fi
+check_python_venv() {
+    echo ""
+    echo "🐍 Python Virtual Environment"
+    echo "============================="
     
-    print_header "🐍 Python Virtual Environment"
-    
-    VENV_PATHS=()
+    local venv_paths=()
     for d in */; do
-        [ -f "$d/bin/activate" ] && VENV_PATHS+=("$d")
+        [ -f "$d/bin/activate" ] && venv_paths+=("$d")
     done
-
-    if [ "${#VENV_PATHS[@]}" -eq 1 ]; then
-        echo "📦 Found virtual environment: ${VENV_PATHS[0]%/}"
-        read -p "❓ Activate this virtual environment? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            source "${VENV_PATHS[0]}bin/activate"
-            echo "✅ Activated: ${VENV_PATHS[0]%/}"
-            echo "✅ Python: $(which python)"
+    
+    if [ "${#venv_paths[@]}" -eq 1 ]; then
+        echo "✅ Virtual environment found: ${venv_paths[0]%/}"
+        if [ -z "$VIRTUAL_ENV" ]; then
+            echo "📝 Suggestion: Activate with 'source ${venv_paths[0]}bin/activate'"
         else
-            echo "⏭️  Skipping virtual environment activation"
+            echo "✅ Virtual environment already active: $(basename "$VIRTUAL_ENV")"
         fi
-    elif [ "${#VENV_PATHS[@]}" -eq 0 ]; then
+    elif [ "${#venv_paths[@]}" -eq 0 ]; then
         echo "❌ No Python virtual environment found"
-        read -p "❓ Create a new virtual environment? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            # Suggest name based on project
-            local suggested_name="venv"
-            if [ -f "manage.py" ]; then
-                suggested_name="django-env"
-            elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
-                suggested_name="venv"
-            fi
-            
-            echo "💡 Suggested name: $suggested_name"
-            read -p "📝 Enter virtual environment name (or press Enter for '$suggested_name'): " venv_name
-            venv_name=${venv_name:-$suggested_name}
-            
-            echo "🔨 Creating virtual environment: $venv_name"
-            python -m venv "$venv_name"
-            
-            read -p "❓ Activate the new virtual environment? (y/n): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                source "$venv_name/bin/activate"
-                echo "✅ Created and activated: $venv_name"
-                echo "✅ Python: $(which python)"
-            else
-                echo "✅ Created: $venv_name (not activated)"
-                echo "💡 To activate later: source $venv_name/bin/activate"
-            fi
-        else
-            echo "⏭️  Skipping virtual environment creation"
-        fi
+        echo "📝 Suggestion: Create one with 'python -m venv venv'"
     else
-        echo "❌ Multiple virtual environments found:"
-        printf '  - %s\n' "${VENV_PATHS[@]%/}"
-        echo "🛠️  Please keep only one venv directory in root."
-        exit 1
-    fi
-}
-
-analyze_project_type() {
-    print_header "🔍 Project Analysis"
-    [ -f "manage.py" ] && echo "🎯 Django project detected"
-    [ -f "package.json" ] && echo "📦 Node.js project detected"
-    [ -f "docker-compose.yml" ] || [ -f "Dockerfile" ] && echo "🐳 Docker project detected"
-}
-
-check_ports() {
-    print_header "📡 Port Check"
-    for port in 3000 5000 8000 8080; do
-        if lsof -i :$port > /dev/null 2>&1; then
-            local proc
-            proc=$(lsof -i :$port | awk 'NR==2 {print $1}')
-            echo "⚠️  Port $port in use by $proc"
-        fi
-    done
-}
-
-check_env_files() {
-    print_header "🔐 Environment Check"
-    if [ -f ".env" ]; then
-        echo "🔑 .env file found"
-        [ -f ".env.example" ] && echo "📝 Reference: .env.example"
+        echo "⚠️  Multiple virtual environments found:"
+        printf '   - %s\n' "${venv_paths[@]%/}"
+        echo "📝 Suggestion: Keep only one venv directory in project root"
     fi
 }
 
 check_project_structure() {
-    if [ "$DIRECTORIES_CHECKED" != true ]; then
-        return 0
-    fi
+    echo ""
+    echo "📁 Project Structure" 
+    echo "===================="
     
-    print_header "📁 Project Structure"
-    local dirs=("src" "tests" "docs" "examples" "scripts" "data" "config" ".github")
+    local standard_dirs=("src" "tests" "docs")
+    local optional_dirs=("examples" "scripts" "data" "config" ".github")
+    local missing_dirs=()
     
-    # Convert comma-separated strings to arrays
-    IFS=',' read -ra CREATE_DIRS_ARRAY <<< "$CREATE_DIRS"
-    IFS=',' read -ra SKIP_DIRS_ARRAY <<< "$SKIP_DIRS"
+    # Check standard directories
+    for dir in "${standard_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            echo "✅ $dir/ exists"
+        else
+            missing_dirs+=("$dir")
+        fi
+    done
     
-    # Check existing directories
-    for dir in "${dirs[@]}"; do
+    # Check optional directories
+    for dir in "${optional_dirs[@]}"; do
         if [ -d "$dir" ]; then
             echo "✅ $dir/ exists"
         fi
     done
     
-    # Create configured directories
-    for dir in "${CREATE_DIRS_ARRAY[@]}"; do
-        if [ -n "$dir" ] && [ ! -d "$dir" ]; then
-            mkdir -p "$dir"
-            echo "✅ Created $dir/ (configured)"
-            
-            case "$dir" in
-                "src")
-                    echo "# Source code" > "$dir/README.md"
-                    ;;
-                "tests")
-                    echo "# Tests" > "$dir/README.md"
-                    ;;
-                "docs")
-                    echo "# Documentation" > "$dir/README.md"
-                    ;;
-                "examples")
-                    echo "# Examples" > "$dir/README.md"
-                    ;;
-                "scripts")
-                    echo "# Build and deployment scripts" > "$dir/README.md"
-                    ;;
-                "data")
-                    echo "# Sample data files" > "$dir/README.md"
-                    ;;
-                "config")
-                    echo "# Configuration files" > "$dir/README.md"
-                    ;;
-                ".github")
-                    mkdir -p "$dir/workflows"
-                    echo "# GitHub workflows and templates" > "$dir/README.md"
-                    ;;
-            esac
+    if [ ${#missing_dirs[@]} -gt 0 ]; then
+        echo "📝 Missing standard directories: ${missing_dirs[*]}"
+        echo "   Suggestion: mkdir -p ${missing_dirs[*]}"
+    fi
+}
+
+check_project_type() {
+    echo ""
+    echo "🔍 Project Type"
+    echo "==============="
+    
+    local project_types=()
+    [ -f "manage.py" ] && project_types+=("Django")
+    [ -f "package.json" ] && project_types+=("Node.js")
+    [ -f "requirements.txt" ] && project_types+=("Python")
+    [ -f "pyproject.toml" ] && project_types+=("Python")
+    [ -f "Dockerfile" ] && project_types+=("Docker")
+    [ -f "docker-compose.yml" ] && project_types+=("Docker Compose")
+    
+    if [ ${#project_types[@]} -gt 0 ]; then
+        echo "✅ Detected: ${project_types[*]}"
+    else
+        echo "❓ Generic project (no specific framework detected)"
+    fi
+}
+
+check_ports() {
+    echo ""
+    echo "📡 Port Status"
+    echo "=============="
+    
+    local busy_ports=()
+    for port in 3000 5000 8000 8080; do
+        if lsof -i :$port > /dev/null 2>&1; then
+            local proc
+            proc=$(lsof -i :$port | awk 'NR==2 {print $1}')
+            busy_ports+=("$port ($proc)")
         fi
     done
     
-    # Show skipped directories
-    if [ -n "$SKIP_DIRS" ]; then
-        echo "⏭️  Skipped directories (configured): $SKIP_DIRS"
+    if [ ${#busy_ports[@]} -gt 0 ]; then
+        echo "⚠️  Busy ports: ${busy_ports[*]}"
+        echo "📝 Suggestion: Stop services or use different ports"
+    else
+        echo "✅ Common development ports (3000, 5000, 8000, 8080) available"
     fi
 }
 
-show_tips() {
-    print_header "💡 Helpful Commands"
-    [ -f "manage.py" ] && echo "  python manage.py runserver"
-    [ -f "package.json" ] && echo "  npm run dev / npm start"
-    echo "  git status"
-    echo "  deactivate  # Exit Python venv"
+check_env_files() {
+    echo ""
+    echo "🔐 Environment Files"
+    echo "==================="
+    
+    if [ -f ".env" ]; then
+        echo "✅ .env file found"
+        [ -f ".env.example" ] && echo "✅ .env.example reference file found"
+        [ ! -f ".env.example" ] && echo "📝 Suggestion: Create .env.example as a template"
+    else
+        echo "❓ No .env file found"
+        [ -f ".env.example" ] && echo "📝 Suggestion: Copy .env.example to .env and configure"
+    fi
+}
+
+show_summary() {
+    echo ""
+    echo "💡 Quick Start Commands"
+    echo "======================"
+    
+    [ -f "manage.py" ] && echo "   python manage.py runserver    # Django development server"
+    [ -f "package.json" ] && echo "   npm run dev                   # Node.js development"
+    [ -f "requirements.txt" ] && echo "   pip install -r requirements.txt  # Install Python dependencies"
+    
+    echo "   git status                    # Check git status"
+    echo "   deactivate                    # Exit Python virtual environment"
 }
 
 main() {
-    echo "🚀 $(date '+%Y-%m-%d %H:%M:%S') Starting dev environment in: $(pwd)"
-    
-    # Check execution mode first
-    check_execution_mode
+    echo "🚀 Development Environment Check - $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Location: $(pwd)"
     echo ""
     
-    # Load or create configuration
-    if ! load_config || [ "$RESET_CONFIG" = true ]; then
-        configure_project
-        echo ""
+    if ! check_git_repo; then
+        exit 1
     fi
     
-    check_git_repo
     check_git_status
-    activate_python_venv
-    analyze_project_type
+    check_python_venv
     check_project_structure
+    check_project_type
     check_ports
     check_env_files
-    show_tips
-    echo ""
-    echo "✅ Dev environment ready: $(pwd)"
+    show_summary
     
-    # Add .dev-start.conf to .gitignore if it doesn't exist
-    if [ -f ".gitignore" ] && ! grep -q ".dev-start.conf" .gitignore; then
-        echo ".dev-start.conf" >> .gitignore
-        echo "📝 Added .dev-start.conf to .gitignore"
-    fi
+    echo ""
+    echo "✅ Environment check complete"
+    echo "📝 Review suggestions above and take action as needed"
 }
 
-# Set up timeout for the entire script
-if [ "$NON_INTERACTIVE" != true ]; then
-    timeout 300 bash -c 'main "$@"' -- "$@" || {
-        echo "⏰ Script timeout after 5 minutes"
-        exit 1
-    }
-else
-    main "$@"
-fi
+main "$@"
