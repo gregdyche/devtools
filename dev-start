@@ -185,7 +185,24 @@ check_ports() {
     fi
     
     local busy_ports=()
-    for port in 3000 5000 8000 8080; do
+    local ports_to_check=()
+    
+    # Add Flask port if Flask is detected
+    if grep -q "flask" requirements.txt 2>/dev/null || grep -q "Flask" requirements.txt 2>/dev/null || [ -f "app.py" ] || [ -f "main.py" ]; then
+        ports_to_check+=(5000)
+    fi
+    
+    # Add other framework ports
+    [ -f "package.json" ] && ports_to_check+=(3000)
+    [ -f "manage.py" ] && ports_to_check+=(8000)
+    [ -f "docker-compose.yml" ] && ports_to_check+=(8080)
+    
+    # If no specific framework detected, check common ports
+    if [ ${#ports_to_check[@]} -eq 0 ]; then
+        ports_to_check=(3000 5000 8000 8080)
+    fi
+    
+    for port in "${ports_to_check[@]}"; do
         if lsof -i :$port > /dev/null 2>&1; then
             local proc
             proc=$(lsof -i :$port | awk 'NR==2 {print $1}')
@@ -218,29 +235,10 @@ check_env_files() {
     if [ -f ".env" ]; then
         if $VERBOSE; then
             echo "✅ .env file found"
-            [ -f ".env.example" ] && echo "✅ .env.example reference file found"
-        fi
-        if [ ! -f ".env.example" ]; then
-            if $VERBOSE; then
-                echo "📝 Suggestion: Create .env.example as a template"
-            else
-                echo "🔐 Missing .env.example:"
-                echo "cp .env .env.example"
-            fi
         fi
     else
-        if [ -f ".env.example" ]; then
-            if $VERBOSE; then
-                echo "❓ No .env file found"
-                echo "📝 Suggestion: Copy .env.example to .env and configure"
-            else
-                echo "🔐 Missing .env file:"
-                echo "cp .env.example .env"
-            fi
-        else
-            if $VERBOSE; then
-                echo "❓ No .env file found"
-            fi
+        if $VERBOSE; then
+            echo "❓ No .env file found"
         fi
     fi
 }
